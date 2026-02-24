@@ -21,6 +21,7 @@ import structlog
 
 from config.logging_setup import configure_logging
 from config.settings import get_settings
+from config.tracing import configure_tracing
 from models.schemas import ArticleStatus
 
 log = structlog.get_logger(__name__)
@@ -30,6 +31,7 @@ def cmd_run() -> int:
     """Run one full pipeline cycle and exit with appropriate code."""
     settings = get_settings()
     configure_logging(level=settings.log_level, fmt=settings.log_format)
+    configure_tracing(settings)
 
     from orchestrator.graph import run_pipeline
 
@@ -82,6 +84,7 @@ def cmd_serve() -> None:
 
     settings = get_settings()
     configure_logging(level=settings.log_level, fmt=settings.log_format)
+    configure_tracing(settings)
 
     print(f"\n🚀 Starting Newsroom API on http://{settings.api_host}:{settings.api_port}")
     print(f"   Docs: http://localhost:{settings.api_port}/docs\n")

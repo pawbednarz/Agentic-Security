@@ -116,6 +116,18 @@ class Settings(BaseSettings):
     api_debug: bool = Field(default=False)
 
     # ------------------------------------------------------------------
+    # LangSmith — observability (optional)
+    # ------------------------------------------------------------------
+    langsmith_api_key: Optional[SecretStr] = Field(
+        default=None,
+        description="LangSmith API key — leave empty to disable tracing",
+    )
+    langsmith_project: str = Field(
+        default="newsroom",
+        description="Project name visible in LangSmith UI",
+    )
+
+    # ------------------------------------------------------------------
     # Logging
     # ------------------------------------------------------------------
     log_level: str = Field(default="INFO")
@@ -161,6 +173,12 @@ class Settings(BaseSettings):
 
     def has_tavily(self) -> bool:
         return self.tavily_api_key is not None
+
+    def has_langsmith(self) -> bool:
+        return (
+            self.langsmith_api_key is not None
+            and bool(self.langsmith_api_key.get_secret_value())
+        )
 
     def language_name(self) -> str:
         return {"pl": "Polish", "en": "English"}.get(self.newsroom_language, "English")

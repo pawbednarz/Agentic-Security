@@ -29,6 +29,7 @@ from pydantic import BaseModel
 
 from config.logging_setup import configure_logging
 from config.settings import Settings, get_settings
+from config.tracing import configure_tracing
 from models.schemas import ArticleStatus, RunMetrics
 from orchestrator.graph import run_pipeline
 
@@ -217,4 +218,5 @@ async def list_articles(settings: Settings = Depends(get_settings)) -> list[Arti
 async def startup() -> None:
     settings = get_settings()
     configure_logging(level=settings.log_level, fmt=settings.log_format)
+    configure_tracing(settings)
     log.info("api.startup", host=settings.api_host, port=settings.api_port)
