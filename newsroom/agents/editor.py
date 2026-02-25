@@ -17,6 +17,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from agents.base import BaseAgent
+from config.prompts import get_prompt
 from config.settings import Settings
 from models.schemas import Article, ArticleStatus, NewsroomState
 
@@ -133,18 +134,7 @@ class EditorAgent(BaseAgent):
     # ------------------------------------------------------------------
 
     def _system_prompt(self) -> str:
-        return (
-            f"You are a senior news editor. The article is written in {self._lang_name}. "
-            "Your job is to improve the article while preserving all factual content. "
-            "Rules:\n"
-            f"1. Keep the article in {self._lang_name}.\n"
-            "2. Do NOT add facts that are not in the original — only reorganise and clarify.\n"
-            "3. Improve sentence flow, remove redundancy, fix grammar.\n"
-            "4. Ensure the lead answers Who/What/When/Where.\n"
-            "5. Each paragraph should have a clear focus.\n"
-            "6. Flag any claims in editor_notes that the fact-checker should verify.\n"
-            "7. If fixing a revision: address ALL the issues listed explicitly."
-        )
+        return get_prompt("editor.edit", language=self._lang_name)
 
     def _user_prompt(self, article: Article, revision_instructions: str) -> str:
         return (

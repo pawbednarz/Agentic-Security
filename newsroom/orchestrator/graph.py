@@ -41,8 +41,9 @@ from agents.fact_checker import FactCheckerAgent
 from agents.journalist import JournalistAgent
 from agents.publisher import PublisherAgent
 from agents.topic_scout import TopicScoutAgent
+from config.overrides import apply_overrides
 from config.settings import Settings
-from models.schemas import ArticleStatus, NewsroomState
+from models.schemas import ArticleStatus, NewsroomState, Topic
 
 log = structlog.get_logger(__name__)
 
@@ -184,22 +185,40 @@ def build_graph(settings: Settings) -> "CompiledGraph":
 # ---------------------------------------------------------------------------
 
 
-def run_pipeline(settings: Settings, run_id: str) -> NewsroomState:
+def run_pipeline(
+    settings: Settings,
+    run_id: str,
+    custom_topic: str | None = None,
+) -> NewsroomState:
     """
     Runs a full newsroom pipeline from scratch.
 
     Args:
-        settings: Application settings
-        run_id:   Unique identifier for this run (used as LangGraph thread_id)
+        settings:     Application settings
+        run_id:       Unique identifier for this run (used as LangGraph thread_id)
+        custom_topic: Optional topic string; skips RSS autodiscovery when set
 
     Returns:
         Final state after the pipeline completes.
     """
-    graph = build_graph(settings)
+    effective_settings = apply_overrides(settings)
+    graph = build_graph(effective_settings)
+
+    initial_topic: Topic | None = None
+    if custom_topic:
+        from uuid import uuid4
+        initial_topic = Topic(
+            id=uuid4(),
+            title=custom_topic,
+            query=custom_topic,
+            summary=f"Custom topic: {custom_topic}",
+            sources=[],
+            category="custom",
+        )
 
     initial_state: NewsroomState = {
         "run_id": run_id,
-        "topic": None,
+        "topic": initial_topic,
         "draft": None,
         "edited_article": None,
         "fact_check": None,

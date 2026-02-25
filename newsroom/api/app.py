@@ -22,11 +22,14 @@ from pathlib import Path
 from typing import Optional
 
 import structlog
-from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request, Security
+from fastapi import BackgroundTasks, Depends, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from api.auth import verify_token
+from api.config_router import router as config_router
 from config.logging_setup import configure_logging
 from config.settings import Settings, get_settings
 from config.tracing import configure_tracing
@@ -59,25 +62,16 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["http://localhost:3000", "http://localhost:8000"],
     allow_credentials=False,
-    allow_methods=["GET", "POST"],
+    allow_methods=["GET", "POST", "PUT", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
 )
 
-# ---------------------------------------------------------------------------
-# Auth — simple Bearer token
-# ---------------------------------------------------------------------------
+app.include_router(config_router)
 
-_bearer = HTTPBearer(auto_error=True)
-
-
-def verify_token(
-    credentials: HTTPAuthorizationCredentials = Security(_bearer),
-    settings: Settings = Depends(get_settings),
-) -> None:
-    expected = settings.api_secret_key.get_secret_value()
-    if credentials.credentials != expected:
-        raise HTTPException(status_code=401, detail="Invalid or missing API token")
-
+# Serve the web GUI at /ui/
+_ui_dir = Path(__file__).parent.parent / "ui"
+if _ui_dir.exists():
+    app.mount("/ui", StaticFiles(directory=str(_ui_dir), html=True), name="ui")
 
 # ---------------------------------------------------------------------------
 # Request / Response schemas
@@ -113,14 +107,14 @@ class ArticleListItem(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _run_in_background(run_id: str, settings: Settings) -> None:
+def _run_in_background(run_id: str, settings: Settings, custom_topic: Optional[str] = None) -> None:
     """
     Runs the pipeline synchronously in a thread pool.
     Stores the result in `_runs` when done.
     """
     try:
         _runs[run_id] = {"status": ArticleStatus.RESEARCHING.value, "run_id": run_id}
-        final_state = run_pipeline(settings, run_id)
+        final_state = run_pipeline(settings, run_id, custom_topic=custom_topic)
         _runs[run_id] = dict(final_state)
     except Exception as e:
         log.error("api.run_failed", run_id=run_id, error=str(e))
@@ -134,6 +128,11 @@ def _run_in_background(run_id: str, settings: Settings) -> None:
 # ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
+
+
+@app.get("/", include_in_schema=False)
+async def root_redirect():
+    return RedirectResponse(url="/ui/index.html")
 
 
 @app.get("/health")
@@ -159,7 +158,7 @@ async def generate_article(
     _runs[run_id] = {"status": ArticleStatus.PENDING.value, "run_id": run_id}
 
     # Run in a background thread (LangGraph is sync)
-    background_tasks.add_task(_run_in_background, run_id, settings)
+    background_tasks.add_task(_run_in_background, run_id, settings, request.query)
 
     log.info("api.generate_requested", run_id=run_id)
     return {"run_id": run_id, "status": "accepted"}

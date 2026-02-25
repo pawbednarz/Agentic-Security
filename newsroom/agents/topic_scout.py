@@ -17,6 +17,7 @@ import structlog
 from pydantic import BaseModel, Field
 
 from agents.base import BaseAgent
+from config.prompts import get_prompt
 from config.settings import Settings
 from models.schemas import ArticleStatus, NewsroomState, SearchResult, Topic
 from tools.rss import RssEntry, RssReader
@@ -69,6 +70,14 @@ class TopicScoutAgent(BaseAgent):
         return self._timed_run("topic_scout", self._execute, state)
 
     def _execute(self, state: NewsroomState) -> dict:
+        # Custom topic pre-populated via API — enrich with search and skip RSS
+        if state.get("topic") is not None:
+            existing = state["topic"]
+            log.info("scout.custom_topic", title=existing.title)
+            results = self._search.search(existing.query or existing.title, topic="news")
+            enriched = existing.model_copy(update={"sources": results})
+            return {"topic": enriched, "status": ArticleStatus.WRITING.value, "errors": list(state.get("errors", []))}
+
         errors = list(state.get("errors", []))
 
         # 1. Fetch RSS entries
@@ -126,12 +135,7 @@ class TopicScoutAgent(BaseAgent):
             f"{i+1}. [{e.source_name}] {e.title}" for i, e in enumerate(entries)
         )
 
-        system = (
-            "You are an experienced news editor. "
-            f"Your goal is to select the single most newsworthy story to write about in {lang}. "
-            "Prefer stories that are recent, have broad impact, and are based on verifiable facts. "
-            "Avoid opinion pieces, sponsored content, and trivial entertainment news."
-        )
+        system = get_prompt("topic_scout.select", language=lang)
         user = (
             f"Here are the latest headlines:\n\n{headlines}\n\n"
             "Select the ONE story that deserves in-depth coverage today and explain why."
