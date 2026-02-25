@@ -60,6 +60,41 @@ class SearchTool:
     # Public interface
     # ------------------------------------------------------------------
 
+    def search_multiple(
+        self, queries: list[str], topic: str = "general"
+    ) -> list[SearchResult]:
+        """
+        Run multiple search queries and return deduplicated results.
+
+        Each query is searched independently. Results are merged,
+        deduplicated by URL, and sorted by relevance score (highest first).
+        This gives the journalist a broader, more diverse set of sources
+        than a single query can provide.
+        """
+        if not queries:
+            raise ValueError("At least one query is required")
+
+        seen_urls: set[str] = set()
+        all_results: list[SearchResult] = []
+
+        for query in queries:
+            try:
+                results = self.search(query, topic=topic)
+                for r in results:
+                    if r.url not in seen_urls:
+                        seen_urls.add(r.url)
+                        all_results.append(r)
+            except Exception as e:
+                log.warning("search.multi_query_error", query=query[:60], error=str(e))
+
+        all_results.sort(key=lambda r: r.score, reverse=True)
+        log.info(
+            "search.multi_done",
+            queries=len(queries),
+            unique_results=len(all_results),
+        )
+        return all_results
+
     def search(self, query: str, topic: str = "general") -> list[SearchResult]:
         """
         Search the web. Returns up to `max_results` sanitized results.

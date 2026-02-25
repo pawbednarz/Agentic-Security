@@ -36,7 +36,18 @@ class TopicSelection(BaseModel):
 
     selected_title: str = Field(description="Title of the chosen RSS item")
     reasoning: str = Field(description="Why this topic is the most newsworthy")
-    search_query: str = Field(description="Best search query to find more context")
+    search_queries: list[str] = Field(
+        min_length=1,
+        max_length=4,
+        description=(
+            "2-4 diverse search queries to gather comprehensive information about this story. "
+            "Each query should target a different angle: "
+            "(1) the main event itself, "
+            "(2) key people or organisations involved, "
+            "(3) background context or related developments. "
+            "Write each query as a short, specific phrase suitable for a web search engine."
+        ),
+    )
     category: str = Field(
         default="general",
         description="Topic category: politics, technology, science, economy, culture, etc.",
@@ -100,13 +111,15 @@ class TopicScoutAgent(BaseAgent):
         chosen_entry = self._find_entry(selection.selected_title, candidates)
         source_url = chosen_entry.url if chosen_entry else ""
 
-        # 3. Search for more context
-        search_results = self._search.search(selection.search_query, topic="news")
+        # 3. Search for more context using all generated queries
+        search_results = self._search.search_multiple(
+            selection.search_queries, topic="news"
+        )
 
         topic = Topic(
             id=uuid4(),
             title=selection.selected_title,
-            query=selection.search_query,
+            query=selection.search_queries[0],
             summary=selection.summary,
             sources=search_results,
             category=selection.category,
@@ -116,6 +129,7 @@ class TopicScoutAgent(BaseAgent):
             "scout.topic_selected",
             title=topic.title,
             category=topic.category,
+            queries=len(selection.search_queries),
             sources=len(search_results),
         )
 
