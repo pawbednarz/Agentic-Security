@@ -8,7 +8,7 @@ Uses pydantic-settings so every value is validated at startup.
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Optional
+from typing import Any, Optional
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -139,6 +139,28 @@ class Settings(BaseSettings):
     # ------------------------------------------------------------------
     # Validators
     # ------------------------------------------------------------------
+
+    @field_validator("tavily_api_key", "langsmith_api_key", mode="before")
+    @classmethod
+    def empty_str_to_none(cls, v: Any) -> Any:
+        """Convert empty env-var strings to None for Optional fields."""
+        if isinstance(v, str) and v.strip() == "":
+            return None
+        return v
+
+    @field_validator("rss_feeds", mode="before")
+    @classmethod
+    def parse_comma_separated(cls, v: Any) -> Any:
+        """Accept both JSON arrays and comma-separated strings."""
+        if isinstance(v, str):
+            v = v.strip()
+            if not v:
+                return []
+            if v.startswith("["):
+                # Looks like JSON — let pydantic handle it
+                return v
+            return [url.strip() for url in v.split(",") if url.strip()]
+        return v
 
     @field_validator("newsroom_language")
     @classmethod
