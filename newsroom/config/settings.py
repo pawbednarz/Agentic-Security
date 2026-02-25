@@ -11,7 +11,37 @@ from functools import lru_cache
 from typing import Any, Optional
 
 from pydantic import Field, SecretStr, field_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    DotEnvSettingsSource,
+    EnvSettingsSource,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
+
+
+# ---------------------------------------------------------------------------
+# Custom env-var sources that fix two pydantic-settings issues:
+#   1. Empty strings for complex fields cause json.loads("") → JSONDecodeError
+#   2. Comma-separated list values (e.g. RSS_FEEDS=url1,url2) are not valid JSON
+# ---------------------------------------------------------------------------
+
+class _SafeEnvSource(EnvSettingsSource):
+    def decode_complex_value(self, field_name: str, field: Any, value: Any) -> Any:
+        if isinstance(value, str) and value.strip() == "":
+            return None
+        if field_name == "rss_feeds" and isinstance(value, str) and not value.startswith("["):
+            return [url.strip() for url in value.split(",") if url.strip()]
+        return super().decode_complex_value(field_name, field, value)
+
+
+class _SafeDotEnvSource(DotEnvSettingsSource):
+    def decode_complex_value(self, field_name: str, field: Any, value: Any) -> Any:
+        if isinstance(value, str) and value.strip() == "":
+            return None
+        if field_name == "rss_feeds" and isinstance(value, str) and not value.startswith("["):
+            return [url.strip() for url in value.split(",") if url.strip()]
+        return super().decode_complex_value(field_name, field, value)
 
 
 class Settings(BaseSettings):
@@ -140,26 +170,30 @@ class Settings(BaseSettings):
     # Validators
     # ------------------------------------------------------------------
 
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """Replace default env sources with safe variants that handle
+        empty strings and comma-separated list values in .env files."""
+        return (
+            init_settings,
+            _SafeEnvSource(settings_cls),
+            _SafeDotEnvSource(settings_cls),
+            file_secret_settings,
+        )
+
     @field_validator("tavily_api_key", "langsmith_api_key", mode="before")
     @classmethod
     def empty_str_to_none(cls, v: Any) -> Any:
         """Convert empty env-var strings to None for Optional fields."""
         if isinstance(v, str) and v.strip() == "":
             return None
-        return v
-
-    @field_validator("rss_feeds", mode="before")
-    @classmethod
-    def parse_comma_separated(cls, v: Any) -> Any:
-        """Accept both JSON arrays and comma-separated strings."""
-        if isinstance(v, str):
-            v = v.strip()
-            if not v:
-                return []
-            if v.startswith("["):
-                # Looks like JSON — let pydantic handle it
-                return v
-            return [url.strip() for url in v.split(",") if url.strip()]
         return v
 
     @field_validator("newsroom_language")
