@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import structlog
 from langchain_core.messages import HumanMessage, SystemMessage
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from agents.base import BaseAgent
 from config.prompts import get_prompt
@@ -35,6 +35,21 @@ class EditedArticle(BaseModel):
     body: str = Field(description="Improved main body")
     conclusion: str = Field(description="Improved conclusion")
     sources: list[str] = Field(description="Keep original sources list")
+
+    @field_validator("sources", mode="before")
+    @classmethod
+    def coerce_sources(cls, v):
+        """LLM sometimes returns a string instead of a list — handle gracefully."""
+        if isinstance(v, str):
+            v = v.strip()
+            if not v or v == "---":
+                return []
+            # Try comma-separated: "src1, src2"
+            return [s.strip() for s in v.split(",") if s.strip()]
+        if v is None:
+            return []
+        return v
+
     editor_notes: str = Field(
         description=(
             "Notes for the fact checker: "
