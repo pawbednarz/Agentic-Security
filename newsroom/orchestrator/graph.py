@@ -167,7 +167,10 @@ def build_graph(settings: Settings) -> "CompiledGraph":
     checkpoints_dir.mkdir(parents=True, exist_ok=True)
     db_path = str(checkpoints_dir / "newsroom.db")
 
-    checkpointer = SqliteSaver.from_conn_string(db_path)
+    import sqlite3
+
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    checkpointer = SqliteSaver(conn)
 
     compiled = graph.compile(
         checkpointer=checkpointer,
