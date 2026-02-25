@@ -31,6 +31,16 @@ log = structlog.get_logger(__name__)
 # ---------------------------------------------------------------------------
 
 
+class SearchQueryTranslation(BaseModel):
+    """A short English search query translated from a non-English topic."""
+
+    query: str = Field(
+        min_length=3,
+        max_length=120,
+        description="Short English keyword-based search query (3-8 keywords)",
+    )
+
+
 class TopicSelection(BaseModel):
     """What the LLM returns when asked to select and describe a topic."""
 
@@ -74,7 +84,14 @@ class TopicScoutAgent(BaseAgent):
         if state.get("topic") is not None:
             existing = state["topic"]
             log.info("scout.custom_topic", title=existing.title)
-            results = self._search.search(existing.query or existing.title, topic="news")
+            query = existing.query or existing.title
+            results = self._search.search(query, topic="news")
+            # Fallback: try English query if the original (often Polish) returned nothing
+            if not results:
+                en_query = self._translate_query(query)
+                if en_query and en_query != query:
+                    log.info("scout.search_retry_en", query=en_query[:80])
+                    results = self._search.search(en_query, topic="news")
             enriched = existing.model_copy(update={"sources": results})
             return {"topic": enriched, "status": ArticleStatus.WRITING.value, "errors": list(state.get("errors", []))}
 
@@ -149,6 +166,25 @@ class TopicScoutAgent(BaseAgent):
             return result
         except Exception as e:
             log.error("scout.llm_error", error=str(e))
+            return None
+
+    def _translate_query(self, query: str) -> Optional[str]:
+        """Translate a non-English search query to English keywords for better DDG results."""
+        try:
+            from langchain_core.messages import HumanMessage, SystemMessage
+
+            llm = self.structured_llm(SearchQueryTranslation)
+            result = llm.invoke([
+                SystemMessage(content=(
+                    "Translate the following topic/query into a short English web "
+                    "search query (3-8 keywords). Focus on the key subject matter. "
+                    "Only output the search query, nothing else."
+                )),
+                HumanMessage(content=query),
+            ])
+            return result.query
+        except Exception as e:
+            log.warning("scout.translate_error", error=str(e))
             return None
 
     @staticmethod

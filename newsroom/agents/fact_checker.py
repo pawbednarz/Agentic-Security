@@ -70,6 +70,16 @@ class ClaimVerification(BaseModel):
     )
 
 
+class SearchQuery(BaseModel):
+    """A concise web search query derived from a claim."""
+
+    query: str = Field(
+        min_length=3,
+        max_length=120,
+        description="Short keyword-based search query (3-8 keywords, English preferred for tech topics)",
+    )
+
+
 # ---------------------------------------------------------------------------
 # Agent
 # ---------------------------------------------------------------------------
@@ -216,30 +226,33 @@ class FactCheckerAgent(BaseAgent):
             return []
 
     def _verify_claim(self, claim: str, article: Article) -> ClaimVerification | None:
-        # Search for evidence
-        search_results = self._search.search(f"{claim}", topic="news")
+        # Build a short, keyword-based search query from the claim
+        search_query = self._build_search_query(claim)
+        search_results = self._search.search(search_query, topic="news")
 
+        # If no results with the generated query, try a simplified English fallback
         if not search_results:
-            return ClaimVerification(
-                claim=claim,
-                verdict="unverified",
-                confidence=0.5,
-                notes="No search results found for this claim",
-            )
+            fallback_query = self._build_english_query(claim)
+            if fallback_query and fallback_query != search_query:
+                log.info("fact_checker.search_retry", query=fallback_query[:80])
+                search_results = self._search.search(fallback_query, topic="general")
 
-        # Build context from search results
+        # Build context from search results (may be empty)
         context_parts = []
         for r in search_results:
             safe = self.wrap_external_content(r.content)
             context_parts.append(f"Source: {r.url}\n{safe}")
-        context = "\n\n".join(context_parts)
+        context = "\n\n".join(context_parts) if context_parts else "(no search results found)"
 
         system = get_prompt("fact_checker.verify")
         user = (
             f"Claim to verify: \"{claim}\"\n\n"
             f"Search results:\n{context}\n\n"
             "Evaluate whether this claim is confirmed, partially_confirmed, "
-            "unverified, or contradicted by the search results."
+            "unverified, or contradicted by the search results. "
+            "If no search results were found, use your own knowledge to assess "
+            "the claim — assign 'confirmed' with moderate confidence (0.6-0.7) "
+            "for widely known facts, or 'unverified' with 0.5 for obscure claims."
         )
 
         try:
@@ -247,4 +260,38 @@ class FactCheckerAgent(BaseAgent):
             return llm.invoke([SystemMessage(content=system), HumanMessage(content=user)])
         except Exception as e:
             log.error("fact_checker.verify_error", claim=claim[:50], error=str(e))
+            return None
+
+    def _build_search_query(self, claim: str) -> str:
+        """Convert a full-sentence claim to a concise search query."""
+        try:
+            llm = self.structured_llm(SearchQuery)
+            result = llm.invoke([
+                SystemMessage(content=(
+                    "Convert the following factual claim into a short, effective "
+                    "web search query (3-8 keywords). Use English if the claim is "
+                    "about an international topic, technology, or widely known subject. "
+                    "Remove filler words. Focus on names, products, and key facts."
+                )),
+                HumanMessage(content=claim),
+            ])
+            return result.query
+        except Exception as e:
+            log.warning("fact_checker.query_build_error", error=str(e))
+            # Fallback: use first 60 chars of the claim
+            return claim[:60]
+
+    def _build_english_query(self, claim: str) -> str | None:
+        """Build a simple English keyword query as a last-resort fallback."""
+        try:
+            llm = self.structured_llm(SearchQuery)
+            result = llm.invoke([
+                SystemMessage(content=(
+                    "Translate the following claim into a short English web search "
+                    "query (3-6 keywords). Only output the query, nothing else."
+                )),
+                HumanMessage(content=claim),
+            ])
+            return result.query
+        except Exception:
             return None
