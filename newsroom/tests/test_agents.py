@@ -21,7 +21,7 @@ from agents.fact_checker import FactCheckerAgent, ClaimVerification, ExtractedCl
 from agents.journalist import JournalistAgent, ArticleDraft
 from agents.publisher import PublisherAgent
 from agents.topic_scout import TopicScoutAgent, TopicSelection
-from models.schemas import Article, ArticleStatus, FactCheckResult
+from models.schemas import Article, ArticleStatus, FactCheckResult, SearchResult
 
 
 # ---------------------------------------------------------------------------
@@ -46,7 +46,7 @@ class TestTopicScoutAgent:
         mock_selection = TopicSelection(
             selected_title="AI Breakthrough Announced",
             reasoning="Very newsworthy",
-            search_query="AI breakthrough 2026",
+            search_queries=["AI breakthrough 2026", "AI research scientists", "AI technology news"],
             category="technology",
             summary="Scientists announce a major AI breakthrough.",
         )
@@ -54,7 +54,7 @@ class TestTopicScoutAgent:
 
         with patch.object(scout._rss, "fetch_recent", return_value=[mock_entry]):
             with patch.object(scout, "_select_topic", return_value=mock_selection):
-                with patch.object(scout._search, "search", return_value=mock_search_results):
+                with patch.object(scout._search, "search_multiple", return_value=mock_search_results):
                     result = scout.run(initial_state)
 
         assert result["topic"] is not None
@@ -105,7 +105,7 @@ class TestJournalistAgent:
                 "Wyniki zostaną opublikowane w Nature. Eksperci oceniają odkrycie "
                 "jako transformacyjne dla całej branży. Konferencja odbędzie się w grudniu."
             ),
-            conclusion="Odkrycie może zmienić medycynę i edukację.",
+            conclusion="Odkrycie może zmienić medycynę i edukację w skali globalnej.",
             sources_used=["https://example.com/ai-article"],
         )
 
@@ -152,9 +152,12 @@ class TestEditorAgent:
             title="Przełomowe odkrycie w dziedzinie sztucznej inteligencji",
             lead="Badacze ogłosili przełom w AI, który może zmienić technologię.",
             body=(
-                "Nowy model osiągnął wyniki przewyższające człowieka. Kluczem był nowy algorytm. "
-                "Wyniki zostaną opublikowane w Nature. Konferencja odbędzie się w grudniu. "
-                "Eksperci uważają odkrycie za transformacyjne."
+                "Nowy model osiągnął wyniki przewyższające człowieka we wszystkich testach "
+                "rozumienia języka naturalnego. Kluczem do sukcesu był nowatorski algorytm "
+                "uczenia maszynowego opracowany przez zespół badaczy. "
+                "Wyniki zostaną opublikowane w prestiżowym czasopiśmie Nature w przyszłym "
+                "tygodniu. Konferencja naukowa odbędzie się w grudniu w Warszawie. "
+                "Eksperci z całego świata uważają to odkrycie za transformacyjne dla branży."
             ),
             conclusion="Odkrycie otwiera nowe możliwości w medycynie i edukacji.",
             sources=["https://example.com/ai-article"],
@@ -191,7 +194,7 @@ class TestEditorAgent:
             title="Title",
             lead="Lead paragraph with enough content to pass validation.",
             body="Body " * 50,
-            conclusion="Conclusion paragraph that wraps things up nicely.",
+            conclusion="Conclusion paragraph that wraps things up nicely for the reader.",
             sources=[],
             editor_notes="Notes",
             changes_summary="Fixed issues",
@@ -233,7 +236,10 @@ class TestFactCheckerAgent:
         mock_verify_llm = MagicMock()
         mock_verify_llm.invoke.return_value = mock_verification
 
-        with patch.object(checker._search, "search", return_value=[]):
+        mock_search_result = SearchResult(
+            title="AI test", url="https://example.com/ai", content="AI surpassed humans.", score=0.9
+        )
+        with patch.object(checker._search, "search", return_value=[mock_search_result]):
             with patch.object(
                 checker, "structured_llm",
                 side_effect=[mock_extract_llm, mock_verify_llm],

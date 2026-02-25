@@ -96,6 +96,49 @@ class TestSearchTool:
             results = tool.search("test query")
             assert results == []
 
+    def test_search_multiple_deduplicates_by_url(self):
+        """Results with the same URL from different queries appear only once."""
+        shared = SearchResult(title="Shared", url="https://example.com/shared", content="x", score=0.8)
+        unique = SearchResult(title="Unique", url="https://example.com/unique", content="y", score=0.6)
+
+        tool = SearchTool(tavily_api_key=None)
+        with patch.object(tool, "search", side_effect=[[shared], [shared, unique]]):
+            results = tool.search_multiple(["query one", "query two"])
+
+        urls = [r.url for r in results]
+        assert urls.count("https://example.com/shared") == 1
+        assert "https://example.com/unique" in urls
+
+    def test_search_multiple_sorts_by_score_descending(self):
+        """Merged results are sorted highest score first."""
+        r1 = SearchResult(title="Low", url="https://a.com", content="a", score=0.3)
+        r2 = SearchResult(title="High", url="https://b.com", content="b", score=0.9)
+        r3 = SearchResult(title="Mid", url="https://c.com", content="c", score=0.6)
+
+        tool = SearchTool(tavily_api_key=None)
+        with patch.object(tool, "search", side_effect=[[r1, r2], [r3]]):
+            results = tool.search_multiple(["q1", "q2"])
+
+        assert results[0].score == 0.9
+        assert results[1].score == 0.6
+        assert results[2].score == 0.3
+
+    def test_search_multiple_empty_queries_raises(self):
+        tool = SearchTool(tavily_api_key=None)
+        with pytest.raises(ValueError, match="At least one"):
+            tool.search_multiple([])
+
+    def test_search_multiple_failed_query_does_not_block_others(self):
+        """If one query raises, the remaining queries still run."""
+        good = SearchResult(title="Good", url="https://good.com", content="g", score=0.7)
+
+        tool = SearchTool(tavily_api_key=None)
+        with patch.object(tool, "search", side_effect=[Exception("timeout"), [good]]):
+            results = tool.search_multiple(["bad query", "good query"])
+
+        assert len(results) == 1
+        assert results[0].title == "Good"
+
     def test_tavily_fallback_to_ddg_on_empty(self):
         """If Tavily returns nothing, should fall back to DDG."""
         mock_tavily = MagicMock()
